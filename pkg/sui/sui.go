@@ -16,6 +16,11 @@ const (
 	CLIBinary                 = "sui"
 	LocalFaucetEndpoint       = "http://127.0.0.1:9123/gas"
 	LocalValidatorRPCEndpoint = "http://127.0.0.1:9000"
+	SuiCoinType               = "0x2::coin::Coin<0x2::sui::SUI>"
+)
+
+var (
+	UseDockerExec = false
 )
 
 func Request(method string) Map {
@@ -31,7 +36,7 @@ func WaitForServer() {
 	req := ToJSON(Request("sui_getTotalTransactionBlocks"))
 
 	for i := 0; i < 30; i++ {
-		res, err := DockerExec("curl", "-d", req, "-H", "Content-Type: application/json", LocalValidatorRPCEndpoint)
+		res, err := Exec("curl", "-d", req, "-H", "Content-Type: application/json", LocalValidatorRPCEndpoint)
 		if err != nil {
 			// if strings.Contains(string(res), "exit code:") {
 			// 	break
@@ -53,7 +58,7 @@ func CallFaucet(addr string) {
 	}
 
 	req := ToJSON(Map{"FixedAmountRequest": Map{"recipient": addr}})
-	_, err := DockerExec("curl", "-d", req, "-H", "Content-Type: application/json", LocalFaucetEndpoint)
+	_, err := Exec("curl", "-d", req, "-H", "Content-Type: application/json", LocalFaucetEndpoint)
 	if err != nil {
 		panic(err)
 	}
@@ -65,7 +70,7 @@ func CLI(command ...string) (res Map) {
 
 	res = make(Map)
 
-	out, err := DockerExec(command...)
+	out, err := Exec(command...)
 	if err != nil {
 		res["error"] = err.Error()
 		return
@@ -96,13 +101,26 @@ func CLI(command ...string) (res Map) {
 	return
 }
 
-func DockerExec(command ...string) (output []byte, err error) {
-	command = append([]string{"exec", DockerImage}, command...)
+func Exec(command ...string) (output []byte, err error) {
+	exe := command[0]
+	if UseDockerExec {
+		exe = "docker"
+		command = append([]string{"exec", DockerImage}, command...)
+	} else {
+		command = command[1:]
+	}
 
-	cmd := exec.Command("docker", command...)
+	cmd := exec.Command(exe, command...)
+	cmd.Stderr = nil
 	output, err = cmd.Output()
 	if err != nil {
 		fmt.Printf("Error executing: %s\n", cmd.String())
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			fmt.Printf("Stdout:\n%s\n", output)
+			if len(exitErr.Stderr) > 0 {
+				fmt.Printf("Stderr:\n%s\n", string(exitErr.Stderr))
+			}
+		}
 	}
 	return
 }
@@ -117,7 +135,7 @@ func FromJSON(jsonBytes []byte) Map {
 	return m
 }
 
-type Map map[string]interface{}
+type Map = map[string]interface{}
 
 func PostJSON(url string, data Map) (resBody Map, err error) {
 	var body io.Reader
